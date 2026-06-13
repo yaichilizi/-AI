@@ -1,0 +1,25 @@
+{
+  "jobs": [
+    {
+      "title": "AI算法实习生",
+      "company": "某智能科技公司",
+      "description": "参与机器学习模型训练、实验分析、算法优化和AI应用原型开发。",
+      "required_skills": ["Python", "PyTorch", "机器学习", "深度学习", "数据分析"],
+      "interview_focus": ["机器学习基础", "模型训练流程", "项目复盘", "实验分析"]
+    },
+    {
+      "title": "大模型应用开发实习生",
+      "company": "某互联网企业",
+      "description": "参与RAG知识库、Agent应用、提示词优化和大模型应用后端开发。",
+      "required_skills": ["Python", "FastAPI", "RAG", "大模型", "向量数据库"],
+      "interview_focus": ["RAG原理", "后端接口设计", "提示词优化", "知识库构建"]
+    },
+    {
+      "title": "数据分析实习生",
+      "company": "某数据服务公司",
+      "description": "负责业务数据处理、指标分析、可视化报表和分析报告撰写。",
+      "required_skills": ["Python", "SQL", "数据分析", "数据挖掘"],
+      "interview_focus": ["SQL查询", "指标体系", "数据清洗", "业务理解"]
+    }
+  ]
+}

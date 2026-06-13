@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>职启AI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">AI Career Coach</p>
+        <h1>职启AI</h1>
+        <p class="hero-text">简历分析、岗位匹配、模拟面试、回答复盘，现已接入 DeepSeek 增强能力。</p>
+      </div>
+      <div class="hero-panel">
+        <div class="metric-card">
+          <span class="metric-label">当前模式</span>
+          <strong>Web 单页应用</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">AI 状态</span>
+          <strong>{{ "DeepSeek 已配置" if ai_configured else "规则模式" }}</strong>
+        </div>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="input-panel card">
+        <div class="section-head">
+          <h2>输入区</h2>
+          <p>导入简历或直接粘贴内容，然后一键分析。</p>
+        </div>
+
+        <label class="field-label" for="resume-text">简历内容</label>
+        <textarea id="resume-text" class="text-area" spellcheck="false">{{ sample_resume }}</textarea>
+
+        <div class="actions">
+          <label class="upload-button">
+            <input id="resume-file" type="file" accept=".txt,.pdf,.docx">
+            导入文件
+          </label>
+          <button id="analyze-button" class="primary-button" type="button">一键分析</button>
+          <button id="reset-button" class="ghost-button" type="button">恢复示例</button>
+        </div>
+
+        <p id="import-status" class="hint">支持导入 `.txt`、`.pdf`、`.docx` 简历文件。</p>
+
+        <label class="field-label" for="answer-text">面试回答复盘</label>
+        <textarea id="answer-text" class="text-area compact" spellcheck="false">{{ sample_answer }}</textarea>
+
+        <button id="review-button" class="secondary-button" type="button">复盘回答</button>
+      </section>
+
+      <section class="output-panel">
+        <div class="output-grid">
+          <article class="card result-card">
+            <div class="section-head">
+              <h2>简历诊断</h2>
+              <p>规则评分与 AI 建议会同时展示。</p>
+            </div>
+            <div id="diagnosis-output" class="rich-output empty-state">分析结果会显示在这里。</div>
+          </article>
+
+          <article class="card result-card">
+            <div class="section-head">
+              <h2>岗位匹配</h2>
+              <p>根据识别到的技能计算匹配度。</p>
+            </div>
+            <label class="field-label" for="job-select">目标岗位</label>
+            <select id="job-select" class="select-field">
+              <option value="">分析后选择岗位</option>
+            </select>
+            <div id="jobs-output" class="rich-output empty-state">岗位匹配结果会显示在这里。</div>
+          </article>
+
+          <article class="card result-card">
+            <div class="section-head">
+              <h2>模拟面试</h2>
+              <p>优先展示 DeepSeek 生成的问题，失败时回退规则版。</p>
+            </div>
+            <div id="interview-output" class="rich-output empty-state">面试题会显示在这里。</div>
+          </article>
+
+          <article class="card result-card">
+            <div class="section-head">
+              <h2>回答复盘</h2>
+              <p>展示评分、反馈和一版更好的示范回答。</p>
+            </div>
+            <div id="review-output" class="rich-output empty-state">复盘结果会显示在这里。</div>
+          </article>
+        </div>
+
+        <article class="card platform-card">
+          <div class="section-head">
+            <h2>招聘网站入口</h2>
+            <p>输入岗位关键词后，直接跳转到对应平台搜索页。</p>
+          </div>
+          <div class="search-bar">
+            <input id="search-keyword" class="search-input" type="text" placeholder="例如：大模型应用开发实习生">
+          </div>
+          <div class="quick-tags">
+            <button class="tag-button" data-keyword="AI算法实习生" type="button">AI算法实习生</button>
+            <button class="tag-button" data-keyword="大模型应用开发" type="button">大模型应用开发</button>
+            <button class="tag-button" data-keyword="数据分析" type="button">数据分析</button>
+            <button class="tag-button" data-keyword="Python开发" type="button">Python开发</button>
+          </div>
+          <div class="platform-grid">
+            <a class="platform-link boss" data-base="https://www.zhipin.com/web/geek/job?city=100010000&query=" href="#" target="_blank" rel="noreferrer">BOSS直聘</a>
+            <a class="platform-link lagou" data-base="https://www.lagou.com/wn/jobs?kd=" href="#" target="_blank" rel="noreferrer">拉勾</a>
+            <a class="platform-link zhilian" data-base="https://sou.zhaopin.com/?jl=530&kw=" href="#" target="_blank" rel="noreferrer">智联招聘</a>
+            <a class="platform-link liepin" data-base="https://www.liepin.com/zhaopin/?key=" href="#" target="_blank" rel="noreferrer">猎聘</a>
+            <a class="platform-link job51" data-base="https://we.51job.com/pc/search?keyword=" href="#" target="_blank" rel="noreferrer">前程无忧</a>
+            <a class="platform-link shixi" data-base="https://www.shixiseng.com/interns?keyword=" href="#" target="_blank" rel="noreferrer">实习僧</a>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    window.__APP_DATA__ = {
+      sampleResume: {{ sample_resume|tojson }},
+      sampleAnswer: {{ sample_answer|tojson }},
+      jobs: {{ jobs|tojson }},
+      aiConfigured: {{ ai_configured|tojson }}
+    };
+  </script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
