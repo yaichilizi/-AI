@@ -1,26 +1,17 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import threading
+import tkinter as tk
+import urllib.parse
 import webbrowser
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
-
-import requests
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+from typing import Iterable
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
-PUBLIC_DIR = BASE_DIR / "public"
-ASSETS_DIR = PUBLIC_DIR / "assets"
-HOST = os.getenv("HOST", "127.0.0.1")
-PORT = int(os.getenv("PORT", "5000"))
-DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
-DEEPSEEK_MODEL = "deepseek-chat"
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
 SKILL_KEYWORDS = {
     "python": "Python",
@@ -172,7 +163,7 @@ def parse_resume(text: str) -> ResumeProfile:
     )
 
 
-def score_resume(resume: ResumeProfile, job: Job | None = None) -> dict[str, Any]:
+def score_resume(resume: ResumeProfile, job: Job | None = None) -> dict:
     text = resume.text
     score = 35
     suggestions: list[str] = []
@@ -231,7 +222,7 @@ def score_resume(resume: ResumeProfile, job: Job | None = None) -> dict[str, Any
     }
 
 
-def match_jobs(resume: ResumeProfile, jobs: Iterable[Job]) -> list[dict[str, Any]]:
+def match_jobs(resume: ResumeProfile, jobs: Iterable[Job]) -> list[dict]:
     results = []
     resume_skills = set(resume.skills)
     for job in jobs:
@@ -244,7 +235,6 @@ def match_jobs(resume: ResumeProfile, jobs: Iterable[Job]) -> list[dict[str, Any
                 "job_id": f"{job.title}::{job.company}",
                 "title": job.title,
                 "company": job.company,
-                "description": job.description,
                 "match_score": score,
                 "matched_skills": matched,
                 "missing_skills": missing,
@@ -268,7 +258,7 @@ def generate_interview_questions(job: Job, resume: ResumeProfile) -> list[str]:
     return questions
 
 
-def review_answer(answer: str, job: Job) -> dict[str, Any]:
+def review_answer(answer: str, job: Job) -> dict:
     text = answer.strip()
     score = 50
     feedback: list[str] = []
@@ -299,351 +289,489 @@ def review_answer(answer: str, job: Job) -> dict[str, Any]:
     }
 
 
-def read_uploaded_document(file_storage) -> str:
-    filename = (file_storage.filename or "").lower()
-    suffix = Path(filename).suffix
+class CareerCoachApp:
+    def __init__(self, root: tk.Tk):
+        self.root = root
+        self.root.title("职启AI · 职业规划教练")
+        self.root.geometry("960x720")
+        self.root.minsize(800, 600)
+        self.root.configure(bg="#f0f4f8")
 
-    if suffix == ".txt":
-        return file_storage.read().decode("utf-8", errors="replace")
-    if suffix == ".pdf":
-        return read_pdf_bytes(file_storage.read())
-    if suffix == ".docx":
-        return read_docx_bytes(file_storage.read())
+        self.jobs = load_jobs(DATA_DIR / "jobs.json")
+        self.resume: ResumeProfile | None = None
+        self.current_job: Job | None = None
+        self.job_lookup: dict[str, Job] = {}
+        self.combo_job_ids: list[str] = []
 
-    raise ValueError("仅支持 .txt、.pdf、.docx 文件。")
+        self._build_ui()
+        self._load_sample()
 
+    def _build_ui(self):
+        header = tk.Frame(self.root, bg="#1a73e8", height=56)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        tk.Label(
+            header,
+            text="职启AI · 职业规划教练",
+            font=("Microsoft YaHei", 18, "bold"),
+            fg="white",
+            bg="#1a73e8",
+        ).pack(side=tk.LEFT, padx=20, pady=10)
 
-def read_pdf_bytes(raw: bytes) -> str:
-    errors: list[str] = []
+        paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-    try:
-        from io import BytesIO
-        from PyPDF2 import PdfReader
+        left = ttk.Frame(paned)
+        right = ttk.Frame(paned)
+        paned.add(left, weight=2)
+        paned.add(right, weight=3)
 
-        reader = PdfReader(BytesIO(raw))
-        pages = [page.extract_text() or "" for page in reader.pages]
-        text = "\n".join(pages).strip()
-        if text:
-            return text
-        errors.append("PyPDF2 未提取到文本，可能是扫描版 PDF。")
-    except ImportError:
-        errors.append("未安装 PyPDF2。")
-    except Exception as exc:
-        errors.append(f"PyPDF2 解析失败: {exc}")
+        self._build_left_panel(left)
+        self._build_right_panel(right)
 
-    try:
-        from io import BytesIO
-        import pdfplumber
+    def _build_left_panel(self, parent: ttk.Frame):
+        title_frame = ttk.Frame(parent)
+        title_frame.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(title_frame, text="简历内容", font=("Microsoft YaHei", 13, "bold")).pack(side=tk.LEFT)
 
-        with pdfplumber.open(BytesIO(raw)) as pdf:
-            pages = [page.extract_text() or "" for page in pdf.pages]
-        text = "\n".join(pages).strip()
-        if text:
-            return text
-        errors.append("pdfplumber 未提取到文本，可能需要 OCR。")
-    except ImportError as exc:
-        raise ImportError("解析 PDF 需要安装 PyPDF2 或 pdfplumber。") from exc
-    except Exception as exc:
-        raise RuntimeError(f"PDF 解析失败: {exc}") from exc
+        self.resume_text = scrolledtext.ScrolledText(
+            parent,
+            height=14,
+            font=("Microsoft YaHei", 10),
+            wrap=tk.WORD,
+            relief=tk.SOLID,
+            borderwidth=1,
+        )
+        self.resume_text.pack(fill=tk.BOTH, expand=True)
 
-    raise RuntimeError("PDF 未提取到可用文本。 " + " ".join(errors))
+        btn_frame = ttk.Frame(parent)
+        btn_frame.pack(fill=tk.X, pady=10)
 
+        self.import_btn = tk.Button(
+            btn_frame,
+            text="导入文件",
+            font=("Microsoft YaHei", 10),
+            fg="white",
+            bg="#1a73e8",
+            activebackground="#1557b0",
+            activeforeground="white",
+            relief=tk.FLAT,
+            cursor="hand2",
+            padx=12,
+            pady=4,
+            command=self._on_import,
+        )
+        self.import_btn.pack(side=tk.LEFT, padx=(0, 10))
 
-def read_docx_bytes(raw: bytes) -> str:
-    try:
-        from io import BytesIO
-        from docx import Document
+        self.analyze_btn = ttk.Button(btn_frame, text="一键分析", command=self._on_analyze)
+        self.analyze_btn.pack(side=tk.LEFT, padx=(0, 10))
 
-        doc = Document(BytesIO(raw))
-        paragraphs = [paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()]
-        return "\n".join(paragraphs)
-    except ImportError as exc:
-        raise ImportError("解析 Word 需要安装 python-docx。") from exc
-    except Exception as exc:
-        raise RuntimeError(f"Word 解析失败: {exc}") from exc
+        self.reset_btn = ttk.Button(btn_frame, text="恢复示例", command=self._load_sample)
+        self.reset_btn.pack(side=tk.LEFT)
 
+        self.import_status = ttk.Label(
+            parent,
+            text="支持导入 .txt / .pdf / .docx 简历文件",
+            font=("Microsoft YaHei", 8),
+            foreground="#999",
+        )
+        self.import_status.pack(anchor=tk.W, pady=(0, 5))
 
-def extract_json_block(text: str) -> dict[str, Any]:
-    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-    if not match:
-        raise ValueError("模型返回中未找到 JSON。")
-    return json.loads(match.group(0))
+        ttk.Label(parent, text="面试回答复盘", font=("Microsoft YaHei", 13, "bold")).pack(anchor=tk.W, pady=(15, 5))
+        self.answer_text = scrolledtext.ScrolledText(
+            parent,
+            height=6,
+            font=("Microsoft YaHei", 10),
+            wrap=tk.WORD,
+            relief=tk.SOLID,
+            borderwidth=1,
+        )
+        self.answer_text.pack(fill=tk.BOTH, expand=False)
+        self.answer_text.insert("1.0", "请在这里输入你的面试回答……")
+        self.answer_text.bind("<FocusIn>", self._clear_answer_placeholder)
 
+        self.review_btn = ttk.Button(parent, text="复盘回答", command=self._on_review)
+        self.review_btn.pack(pady=(8, 0))
 
-def call_deepseek(messages: list[dict[str, str]], temperature: float = 0.3) -> str:
-    if not DEEPSEEK_API_KEY:
-        raise RuntimeError("未配置 DeepSeek API Key。")
+    def _build_right_panel(self, parent: ttk.Frame):
+        self.notebook = ttk.Notebook(parent)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
 
-    response = requests.post(
-        DEEPSEEK_API_URL,
-        headers={
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": DEEPSEEK_MODEL,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": False,
-        },
-        timeout=60,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    return payload["choices"][0]["message"]["content"]
+        self.tab_resume = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_resume, text="简历诊断")
+        self._build_diagnosis_tab(self.tab_resume)
 
+        self.tab_jobs = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_jobs, text="岗位匹配")
+        self._build_jobs_tab(self.tab_jobs)
 
-def build_ai_diagnosis(resume_text: str, resume: ResumeProfile, current_job: Job, fallback: dict[str, Any]) -> dict[str, Any]:
-    prompt = f"""
-你是中文求职教练。请基于简历和目标岗位，输出一个 JSON 对象，不要输出 markdown。
+        self.tab_interview = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_interview, text="模拟面试")
+        self._build_interview_tab(self.tab_interview)
 
-JSON 格式：
-{{
-  "summary": "1-2句总体判断",
-  "highlights": ["亮点1", "亮点2", "亮点3"],
-  "risks": ["风险1", "风险2", "风险3"],
-  "rewrite_suggestions": ["建议1", "建议2", "建议3"]
-}}
+        self.tab_review = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_review, text="回答复盘")
+        self._build_review_tab(self.tab_review)
 
-简历信息：
-姓名：{resume.name}
-专业：{resume.major}
-识别技能：{", ".join(resume.skills) or "无"}
-识别项目：{" | ".join(resume.projects) or "无"}
+        self.tab_web = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_web, text="招聘网站")
+        self._build_web_tab(self.tab_web)
 
-目标岗位：
-岗位：{current_job.title}
-公司：{current_job.company}
-描述：{current_job.description}
-技能要求：{", ".join(current_job.required_skills)}
+    def _build_diagnosis_tab(self, parent: ttk.Frame):
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.diagnosis_output = scrolledtext.ScrolledText(
+            frame,
+            font=("Microsoft YaHei", 10),
+            wrap=tk.WORD,
+            state=tk.DISABLED,
+            relief=tk.SOLID,
+            borderwidth=1,
+        )
+        self.diagnosis_output.pack(fill=tk.BOTH, expand=True)
 
-规则分析结果：
-评分：{fallback["score"]}
-建议：{" | ".join(fallback["suggestions"])}
+    def _build_jobs_tab(self, parent: ttk.Frame):
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-原始简历：
-{resume_text}
-""".strip()
+        sel_frame = ttk.Frame(frame)
+        sel_frame.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(sel_frame, text="选择岗位：", font=("Microsoft YaHei", 10)).pack(side=tk.LEFT)
+        self.job_combo = ttk.Combobox(sel_frame, state="readonly", font=("Microsoft YaHei", 10))
+        self.job_combo.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        self.job_combo.bind("<<ComboboxSelected>>", self._on_job_selected)
 
-    raw = call_deepseek(
-        [
-            {"role": "system", "content": "你是一个严格、专业、简洁的中文求职顾问。"},
-            {"role": "user", "content": prompt},
+        self.jobs_output = scrolledtext.ScrolledText(
+            frame,
+            font=("Microsoft YaHei", 10),
+            wrap=tk.WORD,
+            state=tk.DISABLED,
+            relief=tk.SOLID,
+            borderwidth=1,
+        )
+        self.jobs_output.pack(fill=tk.BOTH, expand=True)
+
+    def _build_interview_tab(self, parent: ttk.Frame):
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.interview_output = scrolledtext.ScrolledText(
+            frame,
+            font=("Microsoft YaHei", 10),
+            wrap=tk.WORD,
+            state=tk.DISABLED,
+            relief=tk.SOLID,
+            borderwidth=1,
+        )
+        self.interview_output.pack(fill=tk.BOTH, expand=True)
+
+    def _build_review_tab(self, parent: ttk.Frame):
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.review_output = scrolledtext.ScrolledText(
+            frame,
+            font=("Microsoft YaHei", 10),
+            wrap=tk.WORD,
+            state=tk.DISABLED,
+            relief=tk.SOLID,
+            borderwidth=1,
+        )
+        self.review_output.pack(fill=tk.BOTH, expand=True)
+
+    def _build_web_tab(self, parent: ttk.Frame):
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        ttk.Label(
+            frame,
+            text="输入岗位关键词，点击平台按钮即可跳转到对应招聘网站搜索页。",
+            font=("Microsoft YaHei", 10),
+            wraplength=400,
+        ).pack(anchor=tk.W, pady=(0, 12))
+
+        search_frame = ttk.Frame(frame)
+        search_frame.pack(fill=tk.X, pady=(0, 12))
+        ttk.Label(search_frame, text="搜索岗位：", font=("Microsoft YaHei", 11, "bold")).pack(side=tk.LEFT)
+        self.search_entry = ttk.Entry(search_frame, font=("Microsoft YaHei", 11), width=20)
+        self.search_entry.pack(side=tk.LEFT, padx=8, fill=tk.X, expand=True)
+
+        quick_frame = ttk.Frame(frame)
+        quick_frame.pack(fill=tk.X, pady=(0, 12))
+        ttk.Label(quick_frame, text="快捷填入：", font=("Microsoft YaHei", 9)).pack(side=tk.LEFT)
+        ttk.Button(quick_frame, text="AI算法实习生", command=lambda: self._fill_search("AI算法实习生")).pack(side=tk.LEFT, padx=4)
+        ttk.Button(quick_frame, text="大模型应用开发", command=lambda: self._fill_search("大模型应用开发")).pack(side=tk.LEFT, padx=4)
+        ttk.Button(quick_frame, text="数据分析", command=lambda: self._fill_search("数据分析")).pack(side=tk.LEFT, padx=4)
+        ttk.Button(quick_frame, text="Python开发", command=lambda: self._fill_search("Python开发")).pack(side=tk.LEFT, padx=4)
+
+        ttk.Separator(frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+
+        ttk.Label(frame, text="选择招聘平台：", font=("Microsoft YaHei", 11, "bold")).pack(anchor=tk.W, pady=(0, 10))
+
+        platforms = [
+            ("BOSS直聘", "#5cadff", self._open_boss),
+            ("拉勾", "#00b33b", self._open_lagou),
+            ("智联招聘", "#ff6a00", self._open_zhilian),
+            ("猎聘", "#7b2cbf", self._open_liepin),
+            ("前程无忧", "#e60012", self._open_51job),
+            ("实习僧", "#00a6a0", self._open_shixiseng),
         ]
-    )
-    return extract_json_block(raw)
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X)
+
+        for i, (name, color, cmd) in enumerate(platforms):
+            row = i // 2
+            col = i % 2
+            wrapper = tk.Frame(btn_frame, bg=color, padx=1, pady=1)
+            wrapper.grid(row=row, column=col, padx=5, pady=5, sticky="ew")
+            btn = tk.Button(
+                wrapper,
+                text=name,
+                font=("Microsoft YaHei", 11, "bold"),
+                fg="white",
+                bg=color,
+                activebackground=color,
+                activeforeground="white",
+                relief=tk.FLAT,
+                cursor="hand2",
+                padx=20,
+                pady=10,
+                command=cmd,
+            )
+            btn.pack(fill=tk.BOTH, expand=True)
+        btn_frame.columnconfigure(0, weight=1)
+        btn_frame.columnconfigure(1, weight=1)
+
+    def _on_import(self):
+        file_path = filedialog.askopenfilename(
+            title="选择简历文件",
+            filetypes=[
+                ("所有支持格式", "*.txt *.pdf *.docx"),
+                ("文本文件", "*.txt"),
+                ("PDF文件", "*.pdf"),
+                ("Word文档", "*.docx"),
+            ],
+        )
+        if not file_path:
+            return
+
+        path = Path(file_path)
+        try:
+            text = self._read_document(path)
+        except Exception as exc:
+            messagebox.showerror("导入失败", f"无法读取文件：\n{exc}")
+            self.import_status.config(text=f"导入失败：{exc}", foreground="#e74c3c")
+            return
+
+        if not text.strip():
+            messagebox.showwarning("内容为空", "文件中未提取到文本内容。")
+            self.import_status.config(text="文件中未提取到文本内容", foreground="#e67e22")
+            return
+
+        self.resume_text.delete("1.0", tk.END)
+        self.resume_text.insert("1.0", text)
+        self.import_status.config(text=f"已导入：{path.name}", foreground="#27ae60")
+
+    def _read_document(self, path: Path) -> str:
+        suffix = path.suffix.lower()
+        if suffix == ".txt":
+            return path.read_text(encoding="utf-8", errors="replace")
+        if suffix == ".pdf":
+            return self._read_pdf(path)
+        if suffix == ".docx":
+            return self._read_docx(path)
+        raise ValueError(f"不支持的文件格式：{suffix}")
+
+    def _read_pdf(self, path: Path) -> str:
+        errors = []
+        try:
+            from PyPDF2 import PdfReader
+
+            reader = PdfReader(str(path))
+            pages = [page.extract_text() or "" for page in reader.pages]
+            text = "\n".join(pages).strip()
+            if text:
+                return text
+            errors.append("PyPDF2 未提取到文本，可能是扫描版 PDF。")
+        except ImportError:
+            errors.append("未安装 PyPDF2。")
+        except Exception as exc:
+            errors.append(f"PyPDF2 解析失败：{exc}")
+
+        try:
+            import pdfplumber
+
+            with pdfplumber.open(str(path)) as pdf:
+                pages = [page.extract_text() or "" for page in pdf.pages]
+            text = "\n".join(pages).strip()
+            if text:
+                return text
+            errors.append("pdfplumber 未提取到文本，可能需要 OCR。")
+        except ImportError as exc:
+            raise ImportError("解析 PDF 需要安装 PyPDF2 或 pdfplumber。") from exc
+        except Exception as exc:
+            raise RuntimeError(f"PDF 解析失败：{exc}") from exc
+
+        raise RuntimeError("PDF 未提取到可用文本。 " + " ".join(errors))
+
+    def _read_docx(self, path: Path) -> str:
+        try:
+            from docx import Document
+
+            doc = Document(str(path))
+            paragraphs = [paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()]
+            return "\n".join(paragraphs)
+        except ImportError as exc:
+            raise ImportError("解析 Word 需要安装 python-docx。") from exc
+        except Exception as exc:
+            raise RuntimeError(f"Word 解析失败：{exc}") from exc
+
+    def _load_sample(self):
+        path = DATA_DIR / "sample_resume.txt"
+        if path.exists():
+            self.resume_text.delete("1.0", tk.END)
+            self.resume_text.insert("1.0", path.read_text(encoding="utf-8"))
+        self.answer_text.delete("1.0", tk.END)
+        self.answer_text.insert(
+            "1.0",
+            "我在课程项目中负责实现一个基于 Python 和 PyTorch 的文本分类模型，"
+            "主要完成数据清洗、模型训练和结果分析。通过调整学习率和样本均衡策略，"
+            "模型准确率从 82% 提升到 89%，并将实验过程整理成报告。",
+        )
+
+    def _on_analyze(self):
+        text = self.resume_text.get("1.0", tk.END).strip()
+        if not text:
+            self._set_text(self.diagnosis_output, "请先输入简历内容。")
+            return
+
+        self.resume = parse_resume(text)
+        matches = match_jobs(self.resume, self.jobs)
+        if not matches:
+            self._set_text(self.diagnosis_output, "未找到可匹配的岗位。")
+            return
+
+        best_match = matches[0]
+        self.current_job = next(job for job in self.jobs if job.title == best_match["title"])
+        report = score_resume(self.resume, self.current_job)
+
+        diag = (
+            f"姓名：{self.resume.name}\n"
+            f"专业：{self.resume.major}\n"
+            f"识别技能：{', '.join(self.resume.skills) or '未识别到'}\n\n"
+            f"综合评分：{report['score']} / 100\n\n"
+            "评分构成：\n"
+        )
+        for item in report["breakdown"]:
+            diag += f"  - {item}\n"
+        diag += "\n项目经历：\n"
+        for item in report["projects"]:
+            diag += f"  - {item}\n"
+        diag += "\n优化建议：\n"
+        for item in report["suggestions"]:
+            diag += f"  - {item}\n"
+        self._set_text(self.diagnosis_output, diag)
+
+        job_lines = []
+        for match in matches:
+            job_lines.append(
+                f"{match['title']} @ {match['company']}\n"
+                f"  匹配度：{match['match_score']}%\n"
+                f"  已具备：{', '.join(match['matched_skills']) or '暂无'}\n"
+                f"  仍缺少：{', '.join(match['missing_skills']) or '暂无'}\n"
+            )
+        self._set_text(self.jobs_output, "\n".join(job_lines))
+        self.job_lookup = {f"{job.title}::{job.company}": job for job in self.jobs}
+        self.combo_job_ids = [match["job_id"] for match in matches]
+        self.job_combo["values"] = [f"{match['title']} @ {match['company']}" for match in matches]
+        self.job_combo.current(0)
+
+        self._refresh_interview(self.current_job)
+        self._fill_search(self.current_job.title)
+        self.notebook.select(0)
+
+    def _refresh_interview(self, job: Job):
+        questions = generate_interview_questions(job, self.resume or parse_resume(""))
+        out = f"目标岗位：{job.title} @ {job.company}\n\n岗位描述：{job.description}\n\n模拟面试题：\n\n"
+        for index, question in enumerate(questions, 1):
+            out += f"{index}. {question}\n\n"
+        self._set_text(self.interview_output, out)
+
+    def _on_job_selected(self, _event=None):
+        if self.resume is None:
+            return
+        index = self.job_combo.current()
+        if index < 0 or index >= len(self.combo_job_ids):
+            return
+        self.current_job = self.job_lookup[self.combo_job_ids[index]]
+        self._refresh_interview(self.current_job)
+        self._fill_search(self.current_job.title)
+
+    def _on_review(self):
+        answer = self.answer_text.get("1.0", tk.END).strip()
+        if not answer or answer == "请在这里输入你的面试回答……":
+            self._set_text(self.review_output, "请先输入你的面试回答。")
+            return
+        if self.current_job is None:
+            self._set_text(self.review_output, "请先点击“一键分析”加载岗位信息。")
+            return
+
+        result = review_answer(answer, self.current_job)
+        out = f"回答评分：{result['score']} / 100\n\n反馈意见：\n"
+        for item in result["feedback"]:
+            out += f"  - {item}\n"
+        self._set_text(self.review_output, out)
+        self.notebook.select(3)
+
+    def _clear_answer_placeholder(self, _event=None):
+        if self.answer_text.get("1.0", tk.END).strip() == "请在这里输入你的面试回答……":
+            self.answer_text.delete("1.0", tk.END)
+
+    def _fill_search(self, keyword: str):
+        self.search_entry.delete(0, tk.END)
+        self.search_entry.insert(0, keyword)
+
+    def _get_search_keyword(self) -> str:
+        keyword = self.search_entry.get().strip() or "Python"
+        return urllib.parse.quote(keyword)
+
+    def _open_boss(self):
+        webbrowser.open(f"https://www.zhipin.com/web/geek/job?query={self._get_search_keyword()}&city=100010000")
+
+    def _open_lagou(self):
+        webbrowser.open(f"https://www.lagou.com/wn/jobs?kd={self._get_search_keyword()}")
+
+    def _open_zhilian(self):
+        webbrowser.open(f"https://sou.zhaopin.com/?jl=530&kw={self._get_search_keyword()}")
+
+    def _open_liepin(self):
+        webbrowser.open(f"https://www.liepin.com/zhaopin/?key={self._get_search_keyword()}")
+
+    def _open_51job(self):
+        webbrowser.open(f"https://we.51job.com/pc/search?keyword={self._get_search_keyword()}")
+
+    def _open_shixiseng(self):
+        webbrowser.open(f"https://www.shixiseng.com/interns?keyword={self._get_search_keyword()}")
+
+    @staticmethod
+    def _set_text(widget: scrolledtext.ScrolledText, content: str):
+        widget.configure(state=tk.NORMAL)
+        widget.delete("1.0", tk.END)
+        widget.insert("1.0", content)
+        widget.configure(state=tk.DISABLED)
 
 
-def build_ai_interview_questions(resume: ResumeProfile, current_job: Job, fallback_questions: list[str]) -> list[str]:
-    prompt = f"""
-你是中文面试官。请基于简历和岗位，输出一个 JSON 对象，不要输出 markdown。
+def main():
+    root = tk.Tk()
+    style = ttk.Style()
+    style.theme_use("clam")
+    style.configure("TButton", font=("Microsoft YaHei", 10), padding=6)
+    style.configure("TLabel", font=("Microsoft YaHei", 10), background="#f0f4f8")
+    style.configure("TFrame", background="#f0f4f8")
+    style.configure("TNotebook", background="#f0f4f8")
+    style.configure("TNotebook.Tab", font=("Microsoft YaHei", 10), padding=[15, 6])
 
-JSON 格式：
-{{
-  "questions": ["问题1", "问题2", "问题3", "问题4", "问题5", "问题6"]
-}}
-
-候选人技能：{", ".join(resume.skills) or "无"}
-候选人项目：{" | ".join(resume.projects) or "无"}
-岗位：{current_job.title}
-岗位描述：{current_job.description}
-岗位要求：{", ".join(current_job.required_skills)}
-面试重点：{", ".join(current_job.interview_focus)}
-规则版问题参考：{" | ".join(fallback_questions)}
-""".strip()
-
-    raw = call_deepseek(
-        [
-            {"role": "system", "content": "你是一个严格、专业、简洁的中文技术面试官。"},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.6,
-    )
-    data = extract_json_block(raw)
-    questions = data.get("questions") or []
-    return [str(item).strip() for item in questions if str(item).strip()][:8]
-
-
-def build_ai_review(answer: str, current_job: Job, fallback: dict[str, Any]) -> dict[str, Any]:
-    prompt = f"""
-你是中文面试复盘教练。请基于岗位和候选人回答，输出一个 JSON 对象，不要输出 markdown。
-
-JSON 格式：
-{{
-  "score": 0,
-  "summary": "一句话总结",
-  "feedback": ["反馈1", "反馈2", "反馈3"],
-  "improved_answer": "一段更好的示范回答"
-}}
-
-岗位：{current_job.title}
-岗位描述：{current_job.description}
-岗位要求：{", ".join(current_job.required_skills)}
-规则版评分：{fallback["score"]}
-规则版反馈：{" | ".join(fallback["feedback"])}
-
-候选人回答：
-{answer}
-""".strip()
-
-    raw = call_deepseek(
-        [
-            {"role": "system", "content": "你是一个严格、专业、简洁的中文面试复盘教练。"},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.4,
-    )
-    data = extract_json_block(raw)
-    score = int(data.get("score", fallback["score"]))
-    feedback = [str(item).strip() for item in data.get("feedback", []) if str(item).strip()]
-    return {
-        "score": max(0, min(score, 100)),
-        "summary": str(data.get("summary", "")).strip(),
-        "feedback": feedback or fallback["feedback"],
-        "improved_answer": str(data.get("improved_answer", "")).strip(),
-    }
-
-
-def build_analysis_payload(text: str, selected_job_id: str | None = None) -> dict[str, Any]:
-    resume = parse_resume(text)
-    matches = match_jobs(resume, JOBS)
-    if not matches:
-        raise ValueError("未找到可匹配的岗位。")
-
-    job_lookup = {f"{job.title}::{job.company}": job for job in JOBS}
-    chosen_job_id = selected_job_id if selected_job_id in job_lookup else matches[0]["job_id"]
-    current_job = job_lookup[chosen_job_id]
-    diagnosis = score_resume(resume, current_job)
-    interview_questions = generate_interview_questions(current_job, resume)
-    ai_enabled = False
-    ai_error = ""
-    ai_diagnosis: dict[str, Any] | None = None
-
-    try:
-        ai_diagnosis = build_ai_diagnosis(text, resume, current_job, diagnosis)
-        ai_questions = build_ai_interview_questions(resume, current_job, interview_questions)
-        if ai_questions:
-            interview_questions = ai_questions
-        ai_enabled = True
-    except Exception as exc:
-        ai_error = str(exc)
-
-    return {
-        "resume": asdict(resume),
-        "diagnosis": diagnosis,
-        "jobs": matches,
-        "current_job_id": chosen_job_id,
-        "current_job": asdict(current_job),
-        "interview_questions": interview_questions,
-        "ai_enabled": ai_enabled,
-        "ai_error": ai_error,
-        "ai_diagnosis": ai_diagnosis,
-    }
-
-
-app = Flask(__name__)
-JOBS = load_jobs(DATA_DIR / "jobs.json")
-SAMPLE_RESUME = (DATA_DIR / "sample_resume.txt").read_text(encoding="utf-8")
-SAMPLE_ANSWER = (
-    "我在课程项目中负责实现一个基于 Python 和 PyTorch 的文本分类模型，"
-    "主要完成数据清洗、模型训练和结果分析。通过调整学习率和样本均衡策略，"
-    "模型准确率从 82% 提升到 89%，并将实验过程整理成报告。"
-)
-
-
-@app.get("/assets/<path:filename>")
-def assets(filename: str):
-    return send_from_directory(ASSETS_DIR, filename)
-
-
-@app.get("/")
-def index():
-    return render_template(
-        "index.html",
-        sample_resume=SAMPLE_RESUME,
-        sample_answer=SAMPLE_ANSWER,
-        jobs=[asdict(job) for job in JOBS],
-        ai_configured=bool(DEEPSEEK_API_KEY),
-    )
-
-
-@app.get("/healthz")
-def healthz():
-    return jsonify({"ok": True, "ai_configured": bool(DEEPSEEK_API_KEY)})
-
-
-@app.post("/api/analyze")
-def analyze():
-    payload = request.get_json(silent=True) or {}
-    text = (payload.get("resume_text") or "").strip()
-    selected_job_id = payload.get("job_id")
-
-    if not text:
-        return jsonify({"error": "请先输入简历内容。"}), 400
-
-    try:
-        return jsonify(build_analysis_payload(text, selected_job_id))
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
-
-
-@app.post("/api/review")
-def review():
-    payload = request.get_json(silent=True) or {}
-    answer = (payload.get("answer") or "").strip()
-    job_id = payload.get("job_id")
-
-    if not answer:
-        return jsonify({"error": "请先输入面试回答。"}), 400
-    if not job_id:
-        return jsonify({"error": "请先完成简历分析并选择目标岗位。"}), 400
-
-    job_lookup = {f"{job.title}::{job.company}": job for job in JOBS}
-    current_job = job_lookup.get(job_id)
-    if current_job is None:
-        return jsonify({"error": "岗位信息无效，请重新分析。"}), 400
-
-    fallback = review_answer(answer, current_job)
-    result: dict[str, Any] = {
-        **fallback,
-        "summary": "",
-        "improved_answer": "",
-        "ai_enabled": False,
-        "ai_error": "",
-    }
-
-    try:
-        ai_review = build_ai_review(answer, current_job, fallback)
-        result.update(ai_review)
-        result["ai_enabled"] = True
-    except Exception as exc:
-        result["ai_error"] = str(exc)
-
-    return jsonify(result)
-
-
-@app.post("/api/import")
-def import_resume():
-    uploaded = request.files.get("resume_file")
-    if uploaded is None or not uploaded.filename:
-        return jsonify({"error": "请选择需要导入的简历文件。"}), 400
-
-    try:
-        text = read_uploaded_document(uploaded)
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
-
-    if not text.strip():
-        return jsonify({"error": "文件中未提取到文本内容。"}), 400
-
-    return jsonify({"text": text})
-
-
-def main() -> None:
-    url = f"http://{HOST}:{PORT}"
-    if HOST in {"127.0.0.1", "localhost"}:
-        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
-    app.run(host=HOST, port=PORT, debug=False)
+    CareerCoachApp(root)
+    root.mainloop()
 
 
 if __name__ == "__main__":

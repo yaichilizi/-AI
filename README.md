@@ -1,8 +1,6 @@
-# 职启AI Web 版
+# 职启AI 桌面版
 
-这是一个可本地运行、可部署到公网、可绑定正式域名的网页版求职助手。
-
-## 功能
+这是一个用于展示以下流程的本地桌面版 MVP：
 
 - 简历导入与解析
 - 简历诊断与评分建议
@@ -10,83 +8,27 @@
 - 模拟面试题生成
 - 面试回答复盘
 - 招聘网站搜索入口
-- DeepSeek AI 增强分析
 
-## 本地启动
+## 启动方式
 
 ```powershell
 cd C:\Users\ZhuanZ（无密码）\Documents\Codex\2026-06-11\职启AI\work\ai-career-coach
-pip install -r requirements.txt
-$env:DEEPSEEK_API_KEY="你的 DeepSeek Key"
 python .\main.py
 ```
 
-浏览器打开：
+兼容入口：
 
-```text
-http://127.0.0.1:5000
+```powershell
+python .\app.py
 ```
 
-运行 `python .\main.py` 或 `python .\app.py` 时，本地环境会自动打开浏览器。
+## 可选依赖
 
-## 生产部署
+如果需要导入 PDF 或 Word 简历，再额外安装：
 
-项目已包含：
-
-- `requirements.txt`
-- `render.yaml`
-- `/healthz` 健康检查接口
-- `gunicorn` 启动方式
-
-推荐部署到 Vercel 或 Render。
-
-## 环境变量
-
-至少需要配置：
-
-```text
-DEEPSEEK_API_KEY=你的 DeepSeek Key
+```powershell
+pip install PyPDF2 pdfplumber python-docx
 ```
-
-本地开发可参考 `.env.example`。
-
-## Vercel 部署
-
-项目已包含：
-
-- `vercel.json`
-- `app.py` 作为 Vercel Python 入口
-- `public/assets/` 静态资源
-
-在 Vercel 导入 GitHub 仓库后：
-
-1. 选择仓库 `yaichilizi/-AI`
-2. 保持默认识别即可
-3. 在环境变量中添加 `DEEPSEEK_API_KEY`
-4. 部署完成后访问生成的 `vercel.app` 域名
-5. 再把自定义域名 `app.zhiqi.com` 绑定进去
-
-## Render 部署步骤
-
-1. 把项目推到 GitHub。
-2. 在 Render 创建新的 Web Service。
-3. 连接仓库后，Render 会读取 `render.yaml`。
-4. 在 Render 控制台配置环境变量 `DEEPSEEK_API_KEY`。
-5. 部署完成后先验证：
-
-```text
-https://你的-render-地址/healthz
-```
-
-## 正式域名
-
-部署成功后，可在 Render 后台给服务绑定自定义域名，例如：
-
-```text
-app.yourdomain.com
-```
-
-然后按 Render 提示去你的域名服务商添加 DNS 记录。
 
 ## 目录结构
 
@@ -94,19 +36,13 @@ app.yourdomain.com
 ai-career-coach/
   app.py
   main.py
-  requirements.txt
-  render.yaml
-  .env.example
   data/
     jobs.json
     sample_resume.txt
-  templates/
-    index.html
-  static/
-    styles.css
-    app.js
 ```
 
-## 安全说明
+## 当前实现说明
 
-不要把真实 API Key 写死在源码里。建议将此前暴露过的 DeepSeek Key 立即轮换，并仅通过环境变量配置。
+- 使用 `tkinter` 构建本地桌面界面
+- 简历分析和岗位匹配基于本地规则逻辑
+- 岗位数据来自 `data/jobs.json`

@@ -1,6 +1,6 @@
-"""Compatibility entry point for local runs and Vercel."""
+"""Compatibility entry point for the desktop app."""
 
-from main import app, main
+from main import main
 
 
 if __name__ == "__main__":
