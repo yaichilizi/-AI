@@ -38,7 +38,7 @@ http://127.0.0.1:5000
 - `/healthz` 健康检查接口
 - `gunicorn` 启动方式
 
-推荐部署到 Render。
+推荐部署到 Vercel 或 Render。
 
 ## 环境变量
 
@@ -49,6 +49,22 @@ DEEPSEEK_API_KEY=你的 DeepSeek Key
 ```
 
 本地开发可参考 `.env.example`。
+
+## Vercel 部署
+
+项目已包含：
+
+- `vercel.json`
+- `app.py` 作为 Vercel Python 入口
+- `public/assets/` 静态资源
+
+在 Vercel 导入 GitHub 仓库后：
+
+1. 选择仓库 `yaichilizi/-AI`
+2. 保持默认识别即可
+3. 在环境变量中添加 `DEEPSEEK_API_KEY`
+4. 部署完成后访问生成的 `vercel.app` 域名
+5. 再把自定义域名 `app.zhiqi.com` 绑定进去
 
 ## Render 部署步骤
 

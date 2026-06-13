@@ -1,10 +1,6 @@
-"""Compatibility entry point for the desktop app.
+"""Compatibility entry point for local runs and Vercel."""
 
-The implementation lives in main.py to avoid two divergent copies of the
-same GUI and resume-analysis logic.
-"""
-
-from main import main
+from main import app, main
 
 
 if __name__ == "__main__":

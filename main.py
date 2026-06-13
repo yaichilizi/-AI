@@ -10,10 +10,12 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import requests
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_from_directory
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
+PUBLIC_DIR = BASE_DIR / "public"
+ASSETS_DIR = PUBLIC_DIR / "assets"
 HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "5000"))
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
@@ -547,6 +549,11 @@ SAMPLE_ANSWER = (
     "主要完成数据清洗、模型训练和结果分析。通过调整学习率和样本均衡策略，"
     "模型准确率从 82% 提升到 89%，并将实验过程整理成报告。"
 )
+
+
+@app.get("/assets/<path:filename>")
+def assets(filename: str):
+    return send_from_directory(ASSETS_DIR, filename)
 
 
 @app.get("/")
